@@ -2,7 +2,8 @@
 const express = require("express");
 const {
   createMcpHandler,
-  McpServer
+  McpServer,
+  fromJsonSchema
 } = require("@modelcontextprotocol/server");
 const { toNodeHandler } = require("@modelcontextprotocol/node");
 const {
@@ -65,7 +66,12 @@ async function buildGatewayServer() {
           {
             description:
               tool.description || `Tool provided by ${upstream.name}.`,
-            inputSchema: {}
+            inputSchema: fromJsonSchema(
+            tool.inputSchema || {
+              type: "object",
+              properties: {}
+              }
+            )
           },
           async (args) => {
             try {

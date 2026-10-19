@@ -1,5 +1,9 @@
 ﻿const express = require("express");
-const { createMcpHandler, McpServer } = require("@modelcontextprotocol/server");
+const {
+  createMcpHandler,
+  McpServer,
+  fromJsonSchema
+} = require("@modelcontextprotocol/server");
 const { toNodeHandler } = require("@modelcontextprotocol/node");
 const app = express();
 const PORT = Number(process.env.PORT || 3101);
@@ -31,6 +35,44 @@ const mcpHandler = createMcpHandler(() => {
       ]
     })
   );
+  if (SERVER_NAME === "catalog-upstream") {
+    server.registerTool(
+      "create_demo_product",
+      {
+        description: "Creates a demo product using the supplied name and optional price.",
+        inputSchema: fromJsonSchema({
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "Product name"
+            },
+            price: {
+              type: "number",
+              description: "Optional product price"
+            }
+          },
+          required: ["name"],
+          additionalProperties: false
+        })
+      },
+      async ({ name, price }) => ({
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              status: "ok",
+              message: "Demo product created successfully.",
+              product: {
+                name,
+                ...(price !== undefined ? { price } : {})
+              }
+            })
+          }
+        ]
+      })
+    );
+  }
   return server;
 });
 const nodeMcpHandler = toNodeHandler(mcpHandler);
