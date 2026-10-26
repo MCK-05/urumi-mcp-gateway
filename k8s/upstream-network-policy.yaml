@@ -1,0 +1,27 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: restrict-mcp-upstreams
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - catalog-upstream
+          - inventory-upstream
+          - woocommerce-upstream
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: urumi-mcp-gateway
+      ports:
+        - protocol: TCP
+          port: 3101
+        - protocol: TCP
+          port: 3102
+        - protocol: TCP
+          port: 3103
