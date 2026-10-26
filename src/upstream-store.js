@@ -57,8 +57,8 @@ async function save({id,name,url,enabled=true,bearerToken}){
  const secret=bearerToken?encrypt(String(bearerToken)):null;
  if(id){
   const old=await get("SELECT * FROM upstream_servers WHERE id=?",[id]);if(!old)throw new Error("Upstream not found.");
-  await run("UPDATE upstream_servers SET name=?,url=?,enabled=?,auth_type=?,auth_secret=?,updated_at=CURRENT_TIMESTAMP WHERE id=?",
-   [cleanName,cleanUrl,enabled?1:0,secret?"bearer":"none",secret,id]);
+  await run("UPDATE upstream_servers SET name=?,url=?,enabled=?,auth_type=CASE WHEN ? IS NULL THEN auth_type ELSE 'bearer' END,auth_secret=COALESCE(?,auth_secret),updated_at=CURRENT_TIMESTAMP WHERE id=?",
+   [cleanName,cleanUrl,enabled?1:0,secret,secret,id]);
   return (await all("SELECT * FROM upstream_servers WHERE id=?",[id])).map(safe)[0];
  }
  const result=await run("INSERT INTO upstream_servers(name,url,enabled,auth_type,auth_secret) VALUES(?,?,?,?,?)",
