@@ -107,6 +107,7 @@ async function buildGatewayServer(context)  {
     try {
       await auditLog.recordToolCall({
         userId: authenticatedUser,
+        serverName: upstream.name,
         toolName: tool.name,
         status,
         durationMs: Date.now() - startedAt
@@ -338,11 +339,11 @@ app.post("/api/chat", requireUser, async (req, res) => {
           const args = JSON.parse(toolCall.function.arguments || "{}");
           result = await target.client.callTool({ name: target.originalName, arguments: args });
           calls.push({ name, upstream: target.upstream, outcome: result?.isError ? "error" : "success" });
-          await auditLog.recordToolCall({ userId: req.dashboardUser.email, toolName: name, status: result?.isError ? "error" : "success", durationMs: Date.now() - started });
+          await auditLog.recordToolCall({ userId: req.dashboardUser.email, serverName: target.upstream, toolName: name, status: result?.isError ? "error" : "success", durationMs: Date.now() - started });
         } catch (error) {
           result = { isError: true, content: [{ type: "text", text: "Tool call failed safely: " + error.message }] };
           calls.push({ name, upstream: target?.upstream || "unknown", outcome: "error" });
-          await auditLog.recordToolCall({ userId: req.dashboardUser.email, toolName: name || "unknown", status: "error", durationMs: Date.now() - started }).catch(() => {});
+          await auditLog.recordToolCall({ userId: req.dashboardUser.email, serverName: target?.upstream || "unknown", toolName: name || "unknown", status: "error", durationMs: Date.now() - started }).catch(() => {});
         }
         messages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(result).slice(0, 12000) });
       }
