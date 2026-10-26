@@ -53,6 +53,14 @@ Start Docker Desktop first, then run:
 minikube start --driver=docker
 minikube addons enable ingress
 ```
+Create the dashboard and LLM Kubernetes Secrets from local environment variables (use your own values; never commit them):
+```powershell
+kubectl create secret generic dashboard-admin-secret --from-literal=admin-email="$env:ADMIN_EMAIL" --from-literal=admin-password="$env:ADMIN_PASSWORD"
+kubectl create secret generic llm-api-secret --from-literal=api-key="$env:LLM_API_KEY"
+kubectl create secret generic gateway-encryption-secret --from-literal=encryption-key="$env:UPSTREAM_CREDENTIAL_ENCRYPTION_KEY"
+```
+If a secret already exists, update it with `kubectl create secret generic ... --dry-run=client -o yaml | kubectl apply -f -`. Configure WooCommerce credentials using the existing `woocommerce-api-secret` secret. The dashboard admin is bootstrapped only when the persistent team database is empty.
+
 Build and load the local gateway image:
 ```powershell
 docker build -t urumi-mcp-gateway:local .
