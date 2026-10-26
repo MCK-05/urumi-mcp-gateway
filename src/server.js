@@ -213,6 +213,88 @@ app.all("/mcp", async (req, res) => {
   }
 });
 
+
+const teamStore = require("./team-store");
+const cookieName = "urumi_session";
+function readSessionToken(req) {
+  const cookies = String(req.headers.cookie || "").split(";").map(v => v.trim());
+  const entry = cookies.find(v => v.startsWith(cookieName + "="));
+  return entry ? decodeURIComponent(entry.slice(cookieName.length + 1)) : null;
+}
+async function requireUser(req, res, next) {
+  try {
+    const user = await teamStore.authenticate(readSessionToken(req));
+    if (!user) return res.status(401).json({ error: "Authentication required." });
+    req.dashboardUser = user;
+    next();
+  } catch (error) {
+    console.error("Dashboard authentication failed:", error.message);
+    res.status(500).json({ error: "Authentication service unavailable." });
+  }
+}
+function requireAdmin(req, res, next) {
+  if (req.dashboardUser?.role !== "admin") return res.status(403).json({ error: "Administrator access required." });
+  next();
+}
+function setSessionCookie(res, token) {
+  res.setHeader("Set-Cookie", `${cookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800`);
+}
+void teamStore.init().then(() => teamStore.bootstrapAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD))
+  .then(created => { if (created) console.log("Initial dashboard administrator created from environment configuration."); })
+  .catch(error => console.error("Team store initialization failed:", error.message));
+
+app.post("/api/auth/login", async (req, res) => {
+  try {
+    const result = await teamStore.login(req.body?.email, req.body?.password);
+    if (!result) return res.status(401).json({ error: "Invalid email or password." });
+    setSessionCookie(res, result.token);
+    res.json({ user: result.user });
+  } catch (error) {
+    console.error("Login failed:", error.message);
+    res.status(500).json({ error: "Login failed." });
+  }
+});
+app.get("/api/auth/me", requireUser, (req, res) => res.json({ user: req.dashboardUser }));
+app.post("/api/auth/logout", async (req, res) => {
+  await teamStore.logout(readSessionToken(req));
+  res.setHeader("Set-Cookie", `${cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.status(204).end();
+});
+app.post("/api/team/invites", requireUser, requireAdmin, async (req, res) => {
+  try { res.status(201).json(await teamStore.createInvite(req.body?.email, req.body?.role || "member")); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post("/api/team/accept-invite", async (req, res) => {
+  try { res.status(201).json(await teamStore.acceptInvite(req.body?.token, req.body?.password)); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.get("/api/team/users", requireUser, requireAdmin, async (req, res) => res.json({ users: await teamStore.listUsers() }));
+app.patch("/api/team/users/:id", requireUser, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1 || typeof req.body?.disabled !== "boolean") return res.status(400).json({ error: "A valid user ID and disabled boolean are required." });
+  const changed = await teamStore.setUserDisabled(id, req.body.disabled);
+  res.json({ updated: changed });
+});
+app.get("/api/keys", requireUser, requireAdmin, async (req, res) => res.json({ keys: await apiKeyStore.listApiKeys() }));
+app.post("/api/keys", requireUser, requireAdmin, async (req, res) => {
+  try {
+    const result = await apiKeyStore.issueApiKey(String(req.body?.userId || ""));
+    res.status(201).json({ id: result.id, userId: result.userId, apiKey: result.apiKey, warning: "Copy this key now. It is shown only once." });
+  } catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post("/api/keys/:id/revoke", requireUser, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid key ID." });
+  res.json({ revoked: await apiKeyStore.revokeApiKey(id) });
+});
+app.get("/api/audit", requireUser, requireAdmin, async (req, res) => {
+  const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+  res.json({ events: await auditLog.listAuditLogs(limit) });
+});
+app.get("/api/upstreams", requireUser, async (req, res) => {
+  res.json({ upstreams: UPSTREAMS.map(item => ({ name: item.name, url: item.url, configured: true, management: "static-config" })) });
+});
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);
 });
