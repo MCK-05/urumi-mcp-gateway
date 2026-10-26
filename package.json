@@ -6,7 +6,7 @@
   "scripts": {
     "test": "npm run check",
     "start": "node src/server.js",
-    "check": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('src').filter(x=>x.endsWith('.js'))){require('child_process').execFileSync(process.execPath,['--check','src/'+f],{stdio:'inherit'});}for(const f of fs.readdirSync('dashboard').filter(x=>x.endsWith('.js'))){require('child_process').execFileSync(process.execPath,['--check','dashboard/'+f],{stdio:'inherit'});}console.log('JavaScript syntax checks passed.');\""
+    "check": "node -e \"const fs=require('fs');for(const f of fs.readdirSync('src').filter(x=>x.endsWith('.js'))){require('child_process').execFileSync(process.execPath,['--check','src/'+f],{stdio:'inherit'});}for(const f of fs.readdirSync('dashboard').filter(x=>x.endsWith('.mjs'))){require('child_process').execFileSync(process.execPath,['--check','dashboard/'+f],{stdio:'inherit'});}console.log('JavaScript syntax checks passed.');\""
   },
   "keywords": [],
   "author": "",
