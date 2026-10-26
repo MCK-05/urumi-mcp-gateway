@@ -281,6 +281,72 @@ app.get("/api/audit", requireUser, requireAdmin, async (req, res) => {
   const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
   res.json({ events: await auditLog.listAuditLogs(limit) });
 });
+app.post("/api/chat", requireUser, async (req, res) => {
+  const prompt = String(req.body?.message || "").trim();
+  if (!prompt || prompt.length > 4000) return res.status(400).json({ error: "Message must contain 1–4000 characters." });
+  const baseUrl = process.env.LLM_BASE_URL;
+  const llmKey = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL;
+  if (!baseUrl || !llmKey || !model) return res.status(503).json({ error: "Chat is not configured. Set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL as deployment secrets." });
+  const clients = [], toolMap = new Map(), visibleTools = [], calls = [];
+  try {
+    const configured = await upstreamStore.getEnabled();
+    for (const upstream of configured) {
+      const client = new Client({ name: "urumi-chat-agent", version: "1.0.0" });
+      try {
+        const transport = new StreamableHTTPClientTransport(new URL(upstream.url), upstream.bearerToken ? { requestInit: { headers: { Authorization: "Bearer " + upstream.bearerToken } } } : undefined);
+        await Promise.race([client.connect(transport), new Promise((_, reject) => setTimeout(() => reject(new Error("connect timeout")), 5000))]);
+        clients.push(client);
+        const discovered = await client.listTools();
+        for (const tool of discovered.tools) {
+          let name = tool.name;
+          if (toolMap.has(name)) name = upstream.name + "__" + name;
+          if (toolMap.has(name)) continue;
+          toolMap.set(name, { client, upstream: upstream.name, originalName: tool.name });
+          visibleTools.push({ type: "function", function: { name, description: String(tool.description || "Tool from " + upstream.name).slice(0, 1000), parameters: tool.inputSchema || { type: "object", properties: {} } } });
+        }
+      } catch (error) {
+        console.warn("Chat discovery failed for " + upstream.name + ": " + error.message);
+        await client.close().catch(() => {});
+      }
+    }
+    const endpoint = baseUrl.replace(/\/+$/, "") + "/chat/completions";
+    const messages = [{ role: "system", content: "You are the Urumi store operations assistant. Use available MCP tools for store data and actions. Do not claim an action succeeded unless the tool result confirms it. Ask for confirmation before destructive or irreversible actions." }, { role: "user", content: prompt }];
+    let answer = "";
+    for (let turn = 0; turn < 5; turn++) {
+      const response = await fetch(endpoint, { method: "POST", headers: { Authorization: "Bearer " + llmKey, "Content-Type": "application/json" }, body: JSON.stringify({ model, messages, tools: visibleTools.length ? visibleTools : undefined, tool_choice: visibleTools.length ? "auto" : undefined }), signal: AbortSignal.timeout(45000) });
+      if (!response.ok) throw new Error("LLM provider returned HTTP " + response.status + ".");
+      const payload = await response.json();
+      const choice = payload.choices?.[0]?.message;
+      if (!choice) throw new Error("LLM provider returned an invalid response.");
+      messages.push(choice);
+      if (!choice.tool_calls?.length) { answer = choice.content || ""; break; }
+      for (const toolCall of choice.tool_calls) {
+        const name = toolCall.function?.name;
+        const target = toolMap.get(name);
+        let result;
+        const started = Date.now();
+        try {
+          if (!target) throw new Error("Tool is no longer available.");
+          const args = JSON.parse(toolCall.function.arguments || "{}");
+          result = await target.client.callTool({ name: target.originalName, arguments: args });
+          calls.push({ name, upstream: target.upstream, outcome: result?.isError ? "error" : "success" });
+          await auditLog.recordToolCall({ userId: req.dashboardUser.email, toolName: name, status: result?.isError ? "error" : "success", durationMs: Date.now() - started });
+        } catch (error) {
+          result = { isError: true, content: [{ type: "text", text: "Tool call failed safely: " + error.message }] };
+          calls.push({ name, upstream: target?.upstream || "unknown", outcome: "error" });
+          await auditLog.recordToolCall({ userId: req.dashboardUser.email, toolName: name || "unknown", status: "error", durationMs: Date.now() - started }).catch(() => {});
+        }
+        messages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(result).slice(0, 12000) });
+      }
+    }
+    res.json({ answer, toolCalls: calls });
+  } catch (error) {
+    console.error("Chat request failed:", error.message);
+    res.status(502).json({ error: "Chat request failed. Check the configured LLM provider and upstream connectivity." });
+  } finally { await Promise.allSettled(clients.map(client => client.close())); }
+});
+
 app.get("/api/upstreams", requireUser, async (req, res) => {
   const configured = await upstreamStore.list();
   res.json({ upstreams: configured.map(item => ({ ...item, status: item.enabled ? "Configured" : "Disabled" })) });
