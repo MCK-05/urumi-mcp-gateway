@@ -1,62 +1,47 @@
-﻿# System Design - Urumi.AI MCP Gateway
+# System Design - Urumi.AI MCP Gateway
+
 ## 1. Overview
-This project provides a Kubernetes-hosted Model Context Protocol (MCP)
-gateway for accessing multiple upstream MCP servers through one authenticated
-endpoint. The current implementation includes a Node.js gateway, API-key
-validation, SQLite-backed API-key storage, tool-call audit logging, mock
-catalog and inventory upstreams, and a custom WooCommerce MCP server.
-## 2. Architecture
-The current request path is:
-External MCP client
-  -> Gateway HTTP endpoint (/mcp)
-  -> API-key validation
-  -> MCP tool discovery and registration
-  -> Selected upstream MCP server
-  -> Tool result returned through the gateway
-The upstream configurations currently include:
-- catalog-upstream
-- inventory-upstream
-- woocommerce-upstream
-WordPress and MySQL run as Kubernetes workloads for the store.
-## 3. Authentication and audit
-Clients authenticate to the gateway using a bearer API key. The gateway
-validates the supplied key against the API-key store. Keys are hashed for
-storage; plaintext keys must not be committed or logged.
-Tool executions record the authenticated user ID, tool name, status,
-timestamp, and duration. Audit records are stored in SQLite on persistent
-storage. Audit logging errors are logged without replacing the tool result.
-## 4. Tool discovery and routing
-At gateway-server construction, the gateway connects to configured upstreams,
-discovers their tools, and registers them. Tool calls are forwarded to the
-upstream client associated with the registered tool.
-Duplicate tool names are currently skipped, with a warning. This is a
-simple collision policy; production use should prefer explicit upstream
-namespacing or reject ambiguous registrations.
+The project is a Kubernetes-hosted MCP gateway prototype. External MCP clients authenticate to one gateway endpoint. A React dashboard provides team administration, upstream configuration, audit visibility and a chat UI. The chat agent uses a configurable OpenAI-compatible chat-completions endpoint and calls tools through the same gateway MCP endpoint as external clients.
+
+## 2. Components and request paths
+
+### External MCP client
+External MCP client -> POST /mcp -> bearer API-key validation -> request-scoped gateway MCP server -> enabled upstream MCP servers -> tool result.
+
+### Dashboard chat
+Authenticated dashboard session -> POST /api/chat -> short-lived API key for the logged-in user -> MCP client connects to the gateway's own /mcp endpoint -> LLM tool-calling loop -> tool results -> final response. The short-lived key is revoked after the chat request. Tool calls therefore pass through gateway authentication, routing and audit logic rather than bypassing the gateway.
+
+### Dashboard identity
+- team_users stores email, role, password salt/hash and disabled state.
+- team_sessions stores only a hash of a random session token and an expiry.
+- team_invites stores only a hash of a one-time invitation token and a 24-hour expiry.
+- Passwords use Node.js scrypt; session and invite tokens are random and stored as SHA-256 hashes.
+- Admin-only endpoints manage invitations, members, gateway API keys and audit events.
+
+### Upstream registry
+upstream_servers stores upstream name, MCP URL, enabled state and optional encrypted bearer credentials. Optional credentials use AES-256-GCM and require UPSTREAM_CREDENTIAL_ENCRYPTION_KEY. Plaintext credentials are never returned by the registry API. Only enabled upstreams are discovered for each gateway MCP session.
+
+## 3. Tool discovery, naming and routing
+The gateway discovers tools from every enabled upstream when constructing the MCP server. A tool is registered with the upstream client that supplied it. If a tool name is already registered, the later tool is exposed as upstream-name__tool-name. The tool description includes the originating server name so clients and the chat UI can identify the source. A second collision on the namespaced name is skipped and logged.
+
+## 4. Authentication and audit
+External MCP requests require Authorization: Bearer <API_KEY>. API keys are generated from cryptographically secure random bytes; only SHA-256 hashes are stored. Revocation updates revoked_at, and disabled team members' keys are rejected. Dashboard sessions use HttpOnly, SameSite=Lax cookies with an eight-hour expiry; Secure is enabled when the request is served over HTTPS.
+
+Each tool call records user, upstream server, tool name, timestamp, duration and success/error outcome in SQLite. The dashboard audit table displays these fields. Audit logging must not leak credentials or tool arguments.
+
 ## 5. Failure behavior
-An upstream that is unavailable during discovery is logged and skipped,
-while discovery continues for other upstreams. Consequently, its tools may
-not be present in that gateway session. Tool execution errors return a
-controlled error response and are recorded by the audit callback when that
-callback is reached.
-The current implementation has not yet demonstrated every required failure
-scenario. In particular, discovery failures are application log events, not
-tool-call audit records. Production hardening should add bounded connection
-and request timeouts, retry/backoff where appropriate, health status reporting,
-and tests for upstream failures after discovery.
+Unavailable upstreams are skipped during discovery so other servers can still provide tools. Connection and discovery operations have bounded timeouts; tool calls have a 30-second gateway timeout. The dashboard performs bounded health checks and reports Connected, Unreachable or Disabled with discovered tool names. These behaviors require local acceptance testing, including killing an upstream pod and confirming the other upstreams remain usable.
+
 ## 6. Kubernetes and persistence
-Kubernetes manifests are maintained under `k8s/`. The gateway uses persistent
-storage for its SQLite databases. WordPress and MySQL are deployed separately.
-Local development uses Minikube and service port-forwarding.
-A Helm chart with local and production values is a required deployment
-deliverable. Stable ingress routes, resource requests and limits, probes, and
-Kubernetes Secret integration must be validated before claiming full
-production-like readiness.
-## 7. Production trade-offs and next steps
-Before production use:
-- Move configuration and credentials into Kubernetes Secrets.
-- Add configurable upstream management and enabled/disabled state.
-- Add explicit member roles and administrative authorization.
-- Add timeouts, bounded retries, and upstream health checks.
-- Complete the React dashboard and LLM chat tool-calling loop.
-- Validate persistence, revocation, isolation, and audit attribution end to end.
-- Add metrics, structured logging, and deployment rollback procedures.
+Kubernetes manifests are maintained under k8s/ and the Helm chart under helm/urumi-mcp-gateway/. The gateway SQLite databases share a persistent volume. WordPress files and MySQL data use persistent volumes. Gateway admin credentials, LLM API key and upstream encryption key are referenced through Kubernetes Secrets; secret values must be created out of band and never committed.
+
+The same Helm chart has local and production-like values. A real VPS/k3s deployment and production ingress/TLS have not been verified.
+
+## 7. Known limitations and production trade-offs
+- The dashboard currently loads React from an external ESM CDN; production should bundle static assets and serve them locally.
+- Invitations produce a one-time token for an administrator to share securely; email delivery is not implemented.
+- The LLM integration targets the OpenAI-compatible chat-completions API; provider compatibility and model tool-call support must be tested.
+- The chat agent includes a confirmation instruction for destructive actions, but application-level approval gates should be added before production.
+- SQLite is suitable for this single-replica prototype; multi-replica production should use a managed transactional database and shared session/key stores.
+- Further security testing is required for CSRF, rate limits, session rotation, SSRF/network policy, prompt injection and tenant-level tool permissions.
+- Complete storefront checkout, two-user external MCP, key-revocation, upstream outage, audit-attribution and demo-video acceptance scenarios before submission.

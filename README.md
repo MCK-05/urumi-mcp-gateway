@@ -1,6 +1,6 @@
 ﻿# Urumi.AI FDE Internship - MCP Gateway on Kubernetes
 A Kubernetes-based WooCommerce and MCP gateway prototype. The gateway discovers tools from multiple upstream MCP servers, routes tool calls, authenticates clients with API keys, and records audit events.
-> **Project status:** Core gateway, upstream discovery and routing, API-key storage, audit logging, WooCommerce-related MCP service, Kubernetes manifests, and Helm templates are implemented. The complete assignment is not yet finished. The React dashboard, LLM chat agent, and several end-to-end acceptance tests remain incomplete.
+> **Project status:** The round1-completion branch has been built and deployed to Minikube. Dashboard admin login, Gemini-powered MCP tool calling, WooCommerce product creation, and a single chat request using WooCommerce and inventory upstreams have been tested successfully. Several assignment acceptance flows remain incomplete; this prototype is not production-ready.
 ## Architecture
 - **Store:** WordPress and WooCommerce with MySQL and persistent storage.
 - **Gateway:** Node.js, Express, and MCP libraries for upstream discovery, tool aggregation, routing, authentication, and audit logging.
@@ -10,6 +10,10 @@ A Kubernetes-based WooCommerce and MCP gateway prototype. The gateway discovers 
 - `src/server.js` - MCP gateway.
 - `src/api-key-store.js` - API-key storage and validation.
 - `src/audit-log.js` - persistent audit records.
+- `src/team-store.js` - password-hashed dashboard users, sessions, invitations and role state.
+- `src/upstream-store.js` - persistent upstream registry with encrypted optional bearer credentials.
+- `dashboard/` - React dashboard source and styles.
+- `.github/workflows/validate.yml` - syntax and container-build validation.
 - `src/woocommerce-mcp-server.js` - WooCommerce MCP service.
 - `src/test-*.js` - test scripts.
 - `k8s/` - Kubernetes manifests.
@@ -32,13 +36,31 @@ Health check:
 ```powershell
 curl.exe -i http://127.0.0.1:3000/health
 ```
-Configure credentials through environment variables or Kubernetes Secrets. Never commit API keys, passwords, `.env` files, or database files.
+Configure the first administrator and LLM provider before using dashboard/chat:
+```powershell
+$env:ADMIN_EMAIL = "admin@example.com"
+$env:ADMIN_PASSWORD = "use-a-unique-password-at-least-12-characters"
+$env:LLM_BASE_URL = "https://api.openai.com/v1"
+$env:LLM_MODEL = "gpt-4o-mini"
+$env:LLM_API_KEY = "set-this-in-your-secret-manager"
+$env:UPSTREAM_CREDENTIAL_ENCRYPTION_KEY = "generate-a-random-secret-at-least-32-characters"
+npm.cmd start
+```
+The first administrator is created only when the team database has no users. LLM settings must be supplied securely at runtime. The dashboard is served at http://127.0.0.1:3000/; sign in with the bootstrap admin. Never commit API keys, passwords, .env files, or database files.
 ## Kubernetes and Helm
 Start Docker Desktop first, then run:
 ```powershell
 minikube start --driver=docker
 minikube addons enable ingress
 ```
+Create the dashboard and LLM Kubernetes Secrets from local environment variables (use your own values; never commit them):
+```powershell
+kubectl create secret generic dashboard-admin-secret --from-literal=admin-email="$env:ADMIN_EMAIL" --from-literal=admin-password="$env:ADMIN_PASSWORD"
+kubectl create secret generic llm-api-secret --from-literal=api-key="$env:LLM_API_KEY"
+kubectl create secret generic gateway-encryption-secret --from-literal=encryption-key="$env:UPSTREAM_CREDENTIAL_ENCRYPTION_KEY"
+```
+If a secret already exists, update it with `kubectl create secret generic ... --dry-run=client -o yaml | kubectl apply -f -`. Configure WooCommerce credentials using the existing `woocommerce-api-secret` secret. The dashboard admin is bootstrapped only when the persistent team database is empty.
+
 Build and load the local gateway image:
 ```powershell
 docker build -t urumi-mcp-gateway:local .
@@ -68,10 +90,12 @@ Previously exercised in the local environment:
 - WordPress storefront responses through ingress using a host header.
 These tests do not mean that all assignment acceptance criteria have passed.
 ## Incomplete requirements
-- React dashboard and upstream management interface.
-- LLM chat agent and tool-calling loop.
-- Admin/member login, invitations, and member management.
-- Dashboard audit and upstream status views.
+- Run the new branch through CI and local npm test; fix any syntax/runtime failures.
+- Verify admin/member login, invitation acceptance, role restrictions, disabled-user key rejection and session logout.
+- Verify dynamic upstream CRUD, bearer credential encryption, health checks, timeout behavior and tool-name collision behavior.
+- Configure an LLM secret and verify the chat tool-calling loop against the live gateway/upstreams.
+- Verify audit attribution for both dashboard chat and external MCP clients.
+- Harden CSRF/session cookie settings and validate all API routes before public exposure.
 - Full storefront order placement and WooCommerce admin verification.
 - Complete user A/user B and external MCP-client acceptance flows.
 - Verified production-like k3s deployment.

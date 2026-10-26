@@ -1,0 +1,22 @@
+name: Validate gateway
+on:
+  push:
+    branches: [main, round1-completion]
+  pull_request:
+    branches: [main]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - uses: azure/setup-helm@v4
+      - run: helm lint helm/urumi-mcp-gateway
+      - run: helm template urumi-mcp-gateway helm/urumi-mcp-gateway -f helm/urumi-mcp-gateway/values-local.yaml
+      - run: helm template urumi-mcp-gateway helm/urumi-mcp-gateway -f helm/urumi-mcp-gateway/values-production.yaml
+      - run: docker build -t urumi-mcp-gateway:ci .

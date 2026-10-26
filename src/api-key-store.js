@@ -82,7 +82,8 @@ async function validateApiKey(apiKey) {
   const row = await get(
     `SELECT id, user_id, created_at
      FROM api_keys
-     WHERE key_hash = ? AND revoked_at IS NULL`,
+     WHERE key_hash = ? AND revoked_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM team_users u WHERE u.email = api_keys.user_id AND u.disabled_at IS NOT NULL)`,
     [hashApiKey(apiKey)]
   );
   if (!row) return null;
