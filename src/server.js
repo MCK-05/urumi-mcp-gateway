@@ -182,6 +182,7 @@ app.all("/mcp", async (req, res) => {
     });
   }
   try {
+    await startupPromise;
     const apiKeyRecord = await apiKeyStore.validateApiKey(match[1]);
     if (!apiKeyRecord) {
       return res.status(401).json({
@@ -210,6 +211,7 @@ function readSessionToken(req) {
 }
 async function requireUser(req, res, next) {
   try {
+    await startupPromise;
     const user = await teamStore.authenticate(readSessionToken(req));
     if (!user) return res.status(401).json({ error: "Authentication required." });
     req.dashboardUser = user;
@@ -226,9 +228,10 @@ function requireAdmin(req, res, next) {
 function setSessionCookie(res, token) {
   res.setHeader("Set-Cookie", `${cookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800`);
 }
-void Promise.all([teamStore.init(), upstreamStore.init(), apiKeyStore.initDb(), auditLog.initDb()]).then(() => teamStore.bootstrapAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD))
-  .then(created => { if (created) console.log("Initial dashboard administrator created from environment configuration."); })
-  .catch(error => console.error("Team store initialization failed:", error.message));
+const startupPromise = Promise.all([teamStore.init(), upstreamStore.init(), apiKeyStore.initDb(), auditLog.initDb()]).then(async () => {
+  const created = await teamStore.bootstrapAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
+  if (created) console.log("Initial dashboard administrator created from environment configuration.");
+}).catch(error => { console.error("Application data stores failed to initialize:", error.message); throw error; });
 
 app.post("/api/auth/login", async (req, res) => {
   try {
