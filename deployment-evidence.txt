@@ -1,0 +1,37 @@
+﻿NAME                                   READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS        IMAGES                     SELECTOR
+deployment.apps/catalog-upstream       1/1     1            1           6d2h    catalog           urumi-mcp-gateway:round1   app=catalog-upstream
+deployment.apps/inventory-upstream     1/1     1            1           6d2h    inventory         urumi-mcp-gateway:round1   app=inventory-upstream
+deployment.apps/store-mysql            1/1     1            1           6d1h    mysql             mysql:8.4                  app=store-mysql
+deployment.apps/store-wordpress        1/1     1            1           6d1h    wordpress         wordpress:php8.3-apache    app=store-wordpress
+deployment.apps/urumi-mcp-gateway      1/1     1            1           6d3h    gateway           urumi-mcp-gateway:round1   app=urumi-mcp-gateway
+deployment.apps/woocommerce-upstream   1/1     1            1           4d10h   woocommerce-mcp   urumi-mcp-gateway:round1   app=woocommerce-upstream
+
+NAME                                        READY   STATUS      RESTARTS       AGE     IP            NODE       NOMINATED NODE   READINESS GATES
+pod/catalog-upstream-647768c784-6gvpv       1/1     Running     0              3h34m   10.244.0.13   minikube   <none>           <none>
+pod/inventory-upstream-6895cf45d-xxtxg      1/1     Running     0              3h34m   10.244.0.12   minikube   <none>           <none>
+pod/sqlite-check                            0/1     Completed   0              4d5h    <none>        minikube   <none>           <none>
+pod/store-mysql-657784d58d-slz57            1/1     Running     1 (7h7m ago)   6d1h    10.244.0.4    minikube   <none>           <none>
+pod/store-wordpress-5f9c59c5d-vbn65         1/1     Running     1 (7h7m ago)   6d1h    10.244.0.6    minikube   <none>           <none>
+pod/urumi-mcp-gateway-58c5dbcffb-qhplg      1/1     Running     0              133m    10.244.0.17   minikube   <none>           <none>
+pod/woocommerce-upstream-6f4cf9bdb6-zk2q7   1/1     Running     0              3h34m   10.244.0.14   minikube   <none>           <none>
+
+NAME                           TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE     SELECTOR
+service/catalog-upstream       ClusterIP   10.110.96.17     <none>        3101/TCP   6d2h    app=catalog-upstream
+service/inventory-upstream     ClusterIP   10.106.230.97    <none>        3102/TCP   6d2h    app=inventory-upstream
+service/kubernetes             ClusterIP   10.96.0.1        <none>        443/TCP    10d     <none>
+service/store-mysql            ClusterIP   10.98.174.166    <none>        3306/TCP   6d1h    app=store-mysql
+service/store-wordpress        ClusterIP   10.104.99.203    <none>        80/TCP     6d1h    app=store-wordpress
+service/urumi-mcp-gateway      ClusterIP   10.107.117.27    <none>        3000/TCP   6d3h    app=urumi-mcp-gateway
+service/woocommerce-upstream   ClusterIP   10.100.241.223   <none>        3103/TCP   4d10h   app=woocommerce-upstream
+
+NAME                                         STATUS   VOLUME                                     CAPACITY   ACCESS MODES   STORAGECLASS   VOLUMEATTRIBUTESCLASS   AGE    VOLUMEMODE
+persistentvolumeclaim/gateway-api-key-data   Bound    pvc-c85d60e7-d769-4cd5-82e4-735dd848ff35   1Gi        RWO            standard       <unset>                 4d5h   Filesystem
+persistentvolumeclaim/mysql-store-data       Bound    pvc-90e178fe-b35a-4f47-860b-8063892fe277   2Gi        RWO            standard       <unset>                 6d1h   Filesystem
+persistentvolumeclaim/wordpress-files        Bound    pvc-75b63b8a-c743-4e05-a76b-875415c6c1c4   1Gi        RWO            standard       <unset>                 6d1h   Filesystem
+
+NAME                                              CLASS   HOSTS                 ADDRESS        PORTS   AGE
+ingress.networking.k8s.io/urumi-gateway-ingress   nginx   gateway.urumi.local   192.168.49.2   80      3d23h
+ingress.networking.k8s.io/urumi-store-ingress     nginx   store.urumi.local     192.168.49.2   80      3d23h
+
+NAME                                                     POD-SELECTOR                                                        AGE
+networkpolicy.networking.k8s.io/restrict-mcp-upstreams   app in (catalog-upstream,inventory-upstream,woocommerce-upstream)   3h34m
