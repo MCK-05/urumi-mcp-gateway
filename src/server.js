@@ -3,6 +3,7 @@ const express = require("express");
 const path = require("node:path");
 const apiKeyStore = require("./api-key-store");
 const auditLog = require("./audit-log");
+const upstreamStore = require("./upstream-store");
 const {
   createMcpHandler,
   McpServer,
@@ -20,20 +21,6 @@ const PORT = Number(process.env.PORT || 3000);
 app.use(express.json());
 app.use("/dashboard", express.static(path.join(__dirname, "../dashboard")));
 
-const UPSTREAMS = [
-  {
-    name: "catalog-upstream",
-    url: process.env.CATALOG_MCP_URL || "http://localhost:3101/mcp"
-  },
-  {
-    name: "inventory-upstream",
-    url: process.env.INVENTORY_MCP_URL || "http://localhost:3102/mcp"
-  },
-  {
-    name: "woocommerce-upstream",
-    url: process.env.WOOCOMMERCE_MCP_URL || "http://localhost:3103/mcp"
-  }
-];
 async function buildGatewayServer(context)  {
   const authenticatedUser =
     context?.requestInfo?.headers.get("x-urumi-authenticated-user") ||
@@ -46,7 +33,8 @@ async function buildGatewayServer(context)  {
   const connectedClients = [];
   const registeredTools = new Set();
 
-  for (const upstream of UPSTREAMS) {
+  const configuredUpstreams = await upstreamStore.getEnabled();
+  for (const upstream of configuredUpstreams) {
     const client = new Client({
       name: "urumi-gateway-upstream-client",
       version: "1.0.0"
@@ -54,7 +42,8 @@ async function buildGatewayServer(context)  {
 
     try {
       const transport = new StreamableHTTPClientTransport(
-        new URL(upstream.url)
+        new URL(upstream.url),
+        upstream.bearerToken ? { requestInit: { headers: { Authorization: "Bearer " + upstream.bearerToken } } } : undefined
       );
 
       await client.connect(transport);
@@ -63,19 +52,18 @@ async function buildGatewayServer(context)  {
       const result = await client.listTools();
 
       for (const tool of result.tools) {
-        if (registeredTools.has(tool.name)) {
-          console.warn(
-            `Skipping duplicate tool "${tool.name}" from ${upstream.name}`
-          );
+        const exposedToolName = registeredTools.has(tool.name) ? upstream.name + "__" + tool.name : tool.name;
+        if (registeredTools.has(exposedToolName)) {
+          console.warn("Tool collision remains for " + exposedToolName + "; skipping.");
           continue;
         }
 
         // The current mock tools require no input arguments.
         server.registerTool(
-          tool.name,
+          exposedToolName,
           {
             description:
-              tool.description || `Tool provided by ${upstream.name}.`,
+              (tool.description || "Tool provided by " + upstream.name + ".") + (exposedToolName !== tool.name ? " Original tool name: " + tool.name + ". Namespaced due to collision." : ""),
             inputSchema: fromJsonSchema(
             tool.inputSchema || {
               type: "object",
@@ -128,7 +116,7 @@ async function buildGatewayServer(context)  {
 
         );
 
-        registeredTools.add(tool.name);
+        registeredTools.add(exposedToolName);
       }
 
       console.log(
@@ -183,7 +171,7 @@ app.get("/api/status", (req, res) => {
     status: "running",
     api: "available",
     mcp: "configured",
-    upstreams: UPSTREAMS.length
+    upstreams: "dynamic"
   });
 });
 
@@ -241,7 +229,7 @@ function requireAdmin(req, res, next) {
 function setSessionCookie(res, token) {
   res.setHeader("Set-Cookie", `${cookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800`);
 }
-void teamStore.init().then(() => teamStore.bootstrapAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD))
+void Promise.all([teamStore.init(), upstreamStore.init(), apiKeyStore.initDb(), auditLog.initDb()]).then(() => teamStore.bootstrapAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD))
   .then(created => { if (created) console.log("Initial dashboard administrator created from environment configuration."); })
   .catch(error => console.error("Team store initialization failed:", error.message));
 
@@ -294,7 +282,44 @@ app.get("/api/audit", requireUser, requireAdmin, async (req, res) => {
   res.json({ events: await auditLog.listAuditLogs(limit) });
 });
 app.get("/api/upstreams", requireUser, async (req, res) => {
-  res.json({ upstreams: UPSTREAMS.map(item => ({ name: item.name, url: item.url, configured: true, management: "static-config" })) });
+  const configured = await upstreamStore.list();
+  res.json({ upstreams: configured.map(item => ({ ...item, status: item.enabled ? "Configured" : "Disabled" })) });
+});
+app.post("/api/upstreams", requireUser, requireAdmin, async (req, res) => {
+  try { res.status(201).json({ upstream: await upstreamStore.save(req.body || {}) }); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.put("/api/upstreams/:id", requireUser, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid upstream ID." });
+  try { res.json({ upstream: await upstreamStore.save({ ...(req.body || {}), id }) }); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.patch("/api/upstreams/:id", requireUser, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1 || typeof req.body?.enabled !== "boolean") return res.status(400).json({ error: "Valid ID and enabled boolean are required." });
+  res.json({ updated: await upstreamStore.setEnabled(id, req.body.enabled) });
+});
+app.delete("/api/upstreams/:id", requireUser, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: "Invalid upstream ID." });
+  res.json({ removed: await upstreamStore.remove(id) });
+});
+app.post("/api/upstreams/:id/check", requireUser, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const entry = (await upstreamStore.list()).find(item => item.id === id);
+  if (!entry) return res.status(404).json({ error: "Upstream not found." });
+  let client;
+  try {
+    const { Client, StreamableHTTPClientTransport } = require("@modelcontextprotocol/client");
+    client = new Client({ name: "urumi-health-check", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(new URL(entry.url));
+    await Promise.race([client.connect(transport), new Promise((_, reject) => setTimeout(() => reject(new Error("Connection timed out")), 5000))]);
+    const tools = await client.listTools();
+    res.json({ status: "Connected", tools: tools.tools.map(tool => tool.name) });
+  } catch (error) {
+    res.json({ status: "Unreachable", error: "Could not connect to the upstream within the health-check window." });
+  } finally { if (client) await client.close().catch(() => {}); }
 });
 
 app.listen(PORT, "0.0.0.0", () => {
