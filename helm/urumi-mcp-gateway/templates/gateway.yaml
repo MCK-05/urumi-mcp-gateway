@@ -45,6 +45,34 @@ spec:
               value: "http://inventory-upstream:3102/mcp"
             - name: WOOCOMMERCE_MCP_URL
               value: "http://woocommerce-upstream:3103/mcp"
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: dashboard-admin-secret
+                  key: admin-email
+                  optional: true
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dashboard-admin-secret
+                  key: admin-password
+                  optional: true
+            - name: UPSTREAM_CREDENTIAL_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-encryption-secret
+                  key: encryption-key
+                  optional: true
+            - name: LLM_BASE_URL
+              value: "https://api.openai.com/v1"
+            - name: LLM_MODEL
+              value: "gpt-4o-mini"
+            - name: LLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: llm-api-secret
+                  key: api-key
+                  optional: true
           volumeMounts:
             - name: api-key-data
               mountPath: /data
