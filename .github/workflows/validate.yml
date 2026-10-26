@@ -15,4 +15,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - uses: azure/setup-helm@v4
+      - run: helm lint helm/urumi-mcp-gateway
+      - run: helm template urumi-mcp-gateway helm/urumi-mcp-gateway -f helm/urumi-mcp-gateway/values-local.yaml
+      - run: helm template urumi-mcp-gateway helm/urumi-mcp-gateway -f helm/urumi-mcp-gateway/values-production.yaml
       - run: docker build -t urumi-mcp-gateway:ci .
