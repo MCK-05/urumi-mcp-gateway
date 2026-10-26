@@ -155,10 +155,7 @@ const mcpHandler = createMcpHandler(buildGatewayServer);
 const nodeMcpHandler = toNodeHandler(mcpHandler);
 
 app.get("/", (req, res) => {
-  res.json({
-    message: "Urumi MCP Gateway project is starting!",
-    status: "running"
-  });
+  res.sendFile(path.join(__dirname, "../dashboard/index.html"));
 });
 
 app.get("/health", (req, res) => {
