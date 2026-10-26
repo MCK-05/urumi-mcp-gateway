@@ -88,7 +88,7 @@ function App() {
     h("article",{className:"card stat",key:"audit"},[h("span",{key:"label"},"AUDIT EVENTS"),h("strong",{key:"value"},events.length)])
   ]);
   const upstreamRows=upstreams.map(x=>[
-    x.name,x.url,x.enabled?"Enabled":"Disabled",
+    x.name,x.url,x.status+(x.tools?.length?" · "+x.tools.join(", "):""),
     user.role==="admin"?h("div",{className:"actions"},[
       h("button",{className:"secondary",onClick:()=>checkUpstream(x.id),key:"check"},"Check"),
       h("button",{className:"secondary",onClick:()=>{setEditUpId(x.id);setUpName(x.name);setUpUrl(x.url);setUpToken("");},key:"edit"},"Edit"),
@@ -105,7 +105,7 @@ function App() {
       h("button",{type:"submit",key:"save"},editUpId?"Save changes":"Add upstream"),
       editUpId&&h("button",{type:"button",className:"secondary",onClick:()=>{setEditUpId(null);setUpName("");setUpUrl("");setUpToken("");},key:"cancel"},"Cancel")
     ]),
-    h(Table,{headers:["Name","Endpoint","Status","Actions"],rows:upstreamRows,key:"table"})
+    h(Table,{headers:["Name","Endpoint","Status and tools","Actions"],rows:upstreamRows,key:"table"})
   ]);
 
   const adminSections=user.role==="admin"?[
