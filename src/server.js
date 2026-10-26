@@ -1,5 +1,6 @@
 
 const express = require("express");
+const path = require("node:path");
 const apiKeyStore = require("./api-key-store");
 const auditLog = require("./audit-log");
 const {
@@ -17,6 +18,7 @@ const app = express();
 const PORT = Number(process.env.PORT || 3000);
 
 app.use(express.json());
+app.use("/dashboard", express.static(path.join(__dirname, "../dashboard")));
 
 const UPSTREAMS = [
   {
