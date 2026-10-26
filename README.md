@@ -1,6 +1,6 @@
 ﻿# Urumi.AI FDE Internship - MCP Gateway on Kubernetes
 A Kubernetes-based WooCommerce and MCP gateway prototype. The gateway discovers tools from multiple upstream MCP servers, routes tool calls, authenticates clients with API keys, and records audit events.
-> **Project status:** A first implementation of the React dashboard, team identity APIs, dynamic upstream registry, configurable LLM chat tool loop, API-key management, and audit views has been added on the round1-completion branch. These new paths still require local build, security, Kubernetes, and end-to-end verification. Do not treat this repository as production-ready or as having passed all assignment acceptance criteria.
+> **Project status:** The round1-completion branch has been built and deployed to Minikube. Dashboard admin login, Gemini-powered MCP tool calling, WooCommerce product creation, and a single chat request using WooCommerce and inventory upstreams have been tested successfully. Several assignment acceptance flows remain incomplete; this prototype is not production-ready.
 ## Architecture
 - **Store:** WordPress and WooCommerce with MySQL and persistent storage.
 - **Gateway:** Node.js, Express, and MCP libraries for upstream discovery, tool aggregation, routing, authentication, and audit logging.
