@@ -268,7 +268,10 @@ app.patch("/api/team/users/:id", requireUser, requireAdmin, async (req, res) => 
 app.get("/api/keys", requireUser, requireAdmin, async (req, res) => res.json({ keys: await apiKeyStore.listApiKeys() }));
 app.post("/api/keys", requireUser, requireAdmin, async (req, res) => {
   try {
-    const result = await apiKeyStore.issueApiKey(String(req.body?.userId || ""));
+    const email = String(req.body?.userId || "").trim().toLowerCase();
+    const member = (await teamStore.listUsers()).find(user => user.email === email && !user.disabledAt);
+    if (!member) return res.status(400).json({ error: "Choose an active team member by their registered email address." });
+    const result = await apiKeyStore.issueApiKey(member.email);
     res.status(201).json({ id: result.id, userId: result.userId, apiKey: result.apiKey, warning: "Copy this key now. It is shown only once." });
   } catch (error) { res.status(400).json({ error: error.message }); }
 });
