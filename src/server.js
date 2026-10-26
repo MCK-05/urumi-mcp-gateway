@@ -81,10 +81,10 @@ async function buildGatewayServer(context)  {
   let status = "error";
 
   try {
-    const result = await client.callTool({
+    const result = await withTimeout(client.callTool({
       name: tool.name,
       arguments: args
-    });
+    }), 30000, upstream.name + " tool call");
 
     status = result?.isError ? "error" : "success";
     return result;
