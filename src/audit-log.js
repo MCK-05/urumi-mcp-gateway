@@ -50,6 +50,7 @@ async function initDb() {
       CREATE TABLE IF NOT EXISTS audit_logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id TEXT NOT NULL,
+        server_name TEXT NOT NULL DEFAULT 'unknown',
         tool_name TEXT NOT NULL,
         status TEXT NOT NULL
           CHECK (status IN ('success', 'error')),
@@ -57,6 +58,8 @@ async function initDb() {
         duration_ms INTEGER NOT NULL
       )
     `);
+    const columns = await new Promise((resolve, reject) => db.all("PRAGMA table_info(audit_logs)", (error, rows) => error ? reject(error) : resolve(rows)));
+    if (!columns.some(column => column.name === "server_name")) await run("ALTER TABLE audit_logs ADD COLUMN server_name TEXT NOT NULL DEFAULT 'unknown'");
   })();
 
   try {
@@ -70,6 +73,7 @@ async function initDb() {
 
 async function recordToolCall({
   userId,
+  serverName = "unknown",
   toolName,
   status,
   durationMs
@@ -80,6 +84,7 @@ async function recordToolCall({
     throw new Error("A valid audit user ID is required.");
   }
 
+  if (typeof serverName !== "string" || !serverName.trim()) throw new Error("A valid audit server name is required.");
   if (typeof toolName !== "string" || !toolName.trim()) {
     throw new Error("A valid tool name is required.");
   }
@@ -94,9 +99,9 @@ async function recordToolCall({
 
   const result = await run(
     `INSERT INTO audit_logs
-      (user_id, tool_name, status, duration_ms)
-     VALUES (?, ?, ?, ?)`,
-    [userId.trim(), toolName.trim(), status, safeDuration]
+      (user_id, server_name, tool_name, status, duration_ms)
+     VALUES (?, ?, ?, ?, ?)`,
+    [userId.trim(), serverName.trim(), toolName.trim(), status, safeDuration]
   );
 
   return { id: result.lastID };
@@ -112,7 +117,7 @@ async function listAuditLogs(limit = 100) {
 
   return all(
     `SELECT id, user_id AS userId,
-            tool_name AS toolName, status,
+            server_name AS serverName, tool_name AS toolName, status,
             timestamp, duration_ms AS durationMs
      FROM audit_logs
      ORDER BY id DESC
