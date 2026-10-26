@@ -17,6 +17,10 @@ const {
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(label + " timed out after " + ms + "ms")), ms); })]).finally(() => clearTimeout(timer));
+}
 
 app.use(express.json());
 app.use("/dashboard", express.static(path.join(__dirname, "../dashboard")));
@@ -46,10 +50,10 @@ async function buildGatewayServer(context)  {
         upstream.bearerToken ? { requestInit: { headers: { Authorization: "Bearer " + upstream.bearerToken } } } : undefined
       );
 
-      await client.connect(transport);
+      await withTimeout(client.connect(transport), 5000, upstream.name + " connection");
       connectedClients.push(client);
 
-      const result = await client.listTools();
+      const result = await withTimeout(client.listTools(), 5000, upstream.name + " tool discovery");
 
       for (const tool of result.tools) {
         const exposedToolName = registeredTools.has(tool.name) ? upstream.name + "__" + tool.name : tool.name;
@@ -298,7 +302,7 @@ app.post("/api/chat", requireUser, async (req, res) => {
       const client = new Client({ name: "urumi-chat-agent", version: "1.0.0" });
       try {
         const transport = new StreamableHTTPClientTransport(new URL(upstream.url), upstream.bearerToken ? { requestInit: { headers: { Authorization: "Bearer " + upstream.bearerToken } } } : undefined);
-        await Promise.race([client.connect(transport), new Promise((_, reject) => setTimeout(() => reject(new Error("connect timeout")), 5000))]);
+        await withTimeout(client.connect(transport), 5000, upstream.name + " connection");
         clients.push(client);
         const discovered = await client.listTools();
         for (const tool of discovered.tools) {
