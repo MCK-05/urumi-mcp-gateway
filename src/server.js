@@ -27,7 +27,7 @@ app.use("/dashboard", express.static(path.join(__dirname, "../dashboard")));
 
 async function buildGatewayServer(context)  {
   const authenticatedUser =
-    context?.requestInfo?.headers.get("x-urumi-authenticated-user") ||
+    context?.requestInfo?.headers?.get("x-urumi-authenticated-user") ||
     "unknown";
   const server = new McpServer({
     name: "urumi-mcp-gateway",
@@ -231,7 +231,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 function setSessionCookie(res, token) {
-  res.setHeader("Set-Cookie", `${cookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800`);
+  res.setHeader("Set-Cookie", `${cookieName}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=28800${res.req?.secure || res.req?.headers["x-forwarded-proto"] === "https" ? "; Secure" : ""}`);
 }
 const startupPromise = Promise.all([teamStore.init(), upstreamStore.init(), apiKeyStore.initDb(), auditLog.initDb()]).then(async () => {
   const created = await teamStore.bootstrapAdmin(process.env.ADMIN_EMAIL, process.env.ADMIN_PASSWORD);
@@ -357,7 +357,21 @@ app.post("/api/chat", requireUser, async (req, res) => {
 
 app.get("/api/upstreams", requireUser, async (req, res) => {
   const configured = await upstreamStore.list();
-  res.json({ upstreams: configured.map(item => ({ ...item, status: item.enabled ? "Configured" : "Disabled" })) });
+  const active = await upstreamStore.getEnabled();
+  const statusById = new Map();
+  await Promise.all(active.map(async item => {
+    let client;
+    try {
+      client = new Client({ name: "urumi-dashboard-health", version: "1.0.0" });
+      const transport = new StreamableHTTPClientTransport(new URL(item.url), item.bearerToken ? { requestInit: { headers: { Authorization: "Bearer " + item.bearerToken } } } : undefined);
+      await withTimeout(client.connect(transport), 3000, item.name + " health check");
+      const discovered = await withTimeout(client.listTools(), 3000, item.name + " tool discovery");
+      statusById.set(item.id, { status: "Connected", tools: discovered.tools.map(tool => tool.name) });
+    } catch {
+      statusById.set(item.id, { status: "Unreachable", tools: [] });
+    } finally { if (client) await client.close().catch(() => {}); }
+  }));
+  res.json({ upstreams: configured.map(item => ({ ...item, ...(item.enabled ? (statusById.get(item.id) || { status: "Unreachable", tools: [] }) : { status: "Disabled", tools: [] }) })) });
 });
 app.post("/api/upstreams", requireUser, requireAdmin, async (req, res) => {
   try { res.status(201).json({ upstream: await upstreamStore.save(req.body || {}) }); }
