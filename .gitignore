@@ -7,3 +7,19 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+# Local databases and runtime data (never commit)
+data/
+*.sqlite
+*.sqlite3
+*.db
+# Helm render output
+helm/rendered-*.yaml
+# Local secrets and credentials
+secrets/
+# Local backup files (do not submit)
+*.backup.*
+*.pre-auth-backup.*
+store-proxy.cjs
+# Generated Helm output
+helm/rendered-*.yaml
+helm/ingress-local.yaml

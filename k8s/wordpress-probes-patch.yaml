@@ -1,0 +1,25 @@
+spec:
+  template:
+    spec:
+      containers:
+        - name: wordpress
+          startupProbe:
+            httpGet:
+              path: /wp-admin/install.php
+              port: http
+            failureThreshold: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /wp-admin/install.php
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /wp-admin/install.php
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5

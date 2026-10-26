@@ -1,0 +1,72 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: woocommerce-upstream
+  labels:
+    app: woocommerce-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: woocommerce-upstream
+  template:
+    metadata:
+      labels:
+        app: woocommerce-upstream
+    spec:
+      containers:
+        - name: woocommerce-mcp
+          image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["node", "src/woocommerce-mcp-server.js"]
+          ports:
+            - name: http
+              containerPort: 3103
+          env:
+            - name: PORT
+              value: "3103"
+            - name: WOOCOMMERCE_API_URL
+              value: "http://store-wordpress/wp-json/wc/v3"
+            - name: WOOCOMMERCE_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: woocommerce-api-secret
+                  key: consumer-key
+            - name: WOOCOMMERCE_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: woocommerce-api-secret
+                  key: consumer-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: woocommerce-upstream
+spec:
+  type: ClusterIP
+  selector:
+    app: woocommerce-upstream
+  ports:
+    - name: http
+      port: 3103
+      targetPort: http

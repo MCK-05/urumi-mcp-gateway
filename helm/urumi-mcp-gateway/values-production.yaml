@@ -1,0 +1,9 @@
+﻿image:
+  repository: ghcr.io/MCK-05/urumi-mcp-gateway
+  tag: latest
+  pullPolicy: IfNotPresent
+ingress:
+  enabled: true
+  className: nginx
+  gatewayHost: gateway.example.com
+  storeHost: store.example.com

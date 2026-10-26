@@ -1,0 +1,15 @@
+﻿image:
+  repository: urumi-mcp-gateway
+  tag: local
+  pullPolicy: Never
+gateway:
+  replicas: 1
+ingress:
+  enabled: false
+  className: nginx
+  gatewayHost: gateway.urumi.local
+  storeHost: store.urumi.local
+storage:
+  gateway: 1Gi
+  wordpress: 1Gi
+  mysql: 2Gi

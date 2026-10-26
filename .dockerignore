@@ -1,0 +1,11 @@
+﻿node_modules
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+data
+*.backup.js
+*.pre-auth-backup.js
+src/test-*.js
+npm-debug.log*

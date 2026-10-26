@@ -1,0 +1,9 @@
+﻿image:
+  repository: urumi-mcp-gateway
+  tag: local
+  pullPolicy: Never
+ingress:
+  enabled: true
+  className: nginx
+  gatewayHost: gateway.urumi.local
+  storeHost: store.urumi.local

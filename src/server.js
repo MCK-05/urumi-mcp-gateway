@@ -1,5 +1,7 @@
-﻿
+
 const express = require("express");
+const apiKeyStore = require("./api-key-store");
+const auditLog = require("./audit-log");
 const {
   createMcpHandler,
   McpServer,
@@ -24,10 +26,16 @@ const UPSTREAMS = [
   {
     name: "inventory-upstream",
     url: process.env.INVENTORY_MCP_URL || "http://localhost:3102/mcp"
+  },
+  {
+    name: "woocommerce-upstream",
+    url: process.env.WOOCOMMERCE_MCP_URL || "http://localhost:3103/mcp"
   }
 ];
-
-async function buildGatewayServer() {
+async function buildGatewayServer(context)  {
+  const authenticatedUser =
+    context?.requestInfo?.headers.get("x-urumi-authenticated-user") ||
+    "unknown";
   const server = new McpServer({
     name: "urumi-mcp-gateway",
     version: "1.0.0"
@@ -73,29 +81,49 @@ async function buildGatewayServer() {
               }
             )
           },
-          async (args) => {
-            try {
-              return await client.callTool({
-                name: tool.name,
-                arguments: args
-              });
-            } catch (error) {
-              console.error(
-                `Tool "${tool.name}" failed on ${upstream.name}:`,
-                error.message
-              );
 
-              return {
-                isError: true,
-                content: [
-                  {
-                    type: "text",
-                    text: `Upstream "${upstream.name}" is unavailable. Please retry later.`
-                  }
-                ]
-              };
-            }
-          }
+          async (args) => {
+  const startedAt = Date.now();
+  let status = "error";
+
+  try {
+    const result = await client.callTool({
+      name: tool.name,
+      arguments: args
+    });
+
+    status = result?.isError ? "error" : "success";
+    return result;
+  } catch (error) {
+    console.error(
+      `Tool "${tool.name}" failed on ${upstream.name}:`,
+      error.message
+    );
+
+    return {
+      isError: true,
+      content: [
+        {
+          type: "text",
+          text: `Upstream "${upstream.name}" is unavailable. Please retry later.`
+        }
+      ]
+    };
+  } finally {
+    try {
+      await auditLog.recordToolCall({
+        userId: authenticatedUser,
+        toolName: tool.name,
+        status,
+        durationMs: Date.now() - startedAt
+      });
+    } catch (auditError) {
+      // Audit failures must not expose secrets or replace the tool result.
+      console.error("Audit logging failed:", auditError.message);
+    }
+  }
+},
+
         );
 
         registeredTools.add(tool.name);
@@ -157,8 +185,32 @@ app.get("/api/status", (req, res) => {
   });
 });
 
-app.all("/mcp", (req, res) => {
-  void nodeMcpHandler(req, res, req.body);
+app.all("/mcp", async (req, res) => {
+  const authorization = req.get("authorization") || "";
+  const match = authorization.match(/^Bearer\s+([a-f0-9]{64})$/i);
+  if (!match) {
+    return res.status(401).json({
+      error: "Unauthorized",
+      message: "A valid API key is required."
+    });
+  }
+  try {
+    const apiKeyRecord = await apiKeyStore.validateApiKey(match[1]);
+    if (!apiKeyRecord) {
+      return res.status(401).json({
+        error: "Unauthorized",
+        message: "A valid API key is required."
+      });
+    }
+    req.apiKeyUser = apiKeyRecord.userId;
+    req.headers["x-urumi-authenticated-user"] = apiKeyRecord.userId;
+    void nodeMcpHandler(req, res, req.body);
+  } catch (error) {
+    console.error("API-key validation failed:", error.message);
+    return res.status(500).json({
+      error: "Internal server error"
+    });
+  }
 });
 
 app.listen(PORT, "0.0.0.0", () => {

@@ -1,0 +1,119 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: catalog-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: catalog-upstream
+  template:
+    metadata:
+      labels:
+        app: catalog-upstream
+    spec:
+      containers:
+        - name: catalog
+          image: urumi-mcp-gateway:local
+          imagePullPolicy: Never
+          command: ["node", "src/mock-upstream-server.js"]
+          ports:
+            - name: http
+              containerPort: 3101
+          env:
+            - name: PORT
+              value: "3101"
+            - name: SERVER_NAME
+              value: "catalog-upstream"
+            - name: TOOL_NAME
+              value: "list_demo_products"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: catalog-upstream
+spec:
+  selector:
+    app: catalog-upstream
+  ports:
+    - port: 3101
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-upstream
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inventory-upstream
+  template:
+    metadata:
+      labels:
+        app: inventory-upstream
+    spec:
+      containers:
+        - name: inventory
+          image: urumi-mcp-gateway:local
+          imagePullPolicy: Never
+          command: ["node", "src/mock-upstream-server.js"]
+          ports:
+            - name: http
+              containerPort: 3102
+          env:
+            - name: PORT
+              value: "3102"
+            - name: SERVER_NAME
+              value: "inventory-upstream"
+            - name: TOOL_NAME
+              value: "get_inventory_summary"
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-upstream
+spec:
+  selector:
+    app: inventory-upstream
+  ports:
+    - port: 3102
+      targetPort: http
