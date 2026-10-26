@@ -67,7 +67,7 @@ async function buildGatewayServer(context)  {
           exposedToolName,
           {
             description:
-              (tool.description || "Tool provided by " + upstream.name + ".") + (exposedToolName !== tool.name ? " Original tool name: " + tool.name + ". Namespaced due to collision." : ""),
+              "[server:" + upstream.name + "] " + (tool.description || "Tool provided by " + upstream.name + ".") + (exposedToolName !== tool.name ? " Original tool name: " + tool.name + ". Namespaced due to collision." : ""),
             inputSchema: fromJsonSchema(
             tool.inputSchema || {
               type: "object",
@@ -296,33 +296,43 @@ app.post("/api/chat", requireUser, async (req, res) => {
   const llmKey = process.env.LLM_API_KEY;
   const model = process.env.LLM_MODEL;
   if (!baseUrl || !llmKey || !model) return res.status(503).json({ error: "Chat is not configured. Set LLM_BASE_URL, LLM_API_KEY and LLM_MODEL as deployment secrets." });
-  const clients = [], toolMap = new Map(), visibleTools = [], calls = [];
+  let gatewayClient, temporaryKeyRecord;
+  const calls = [];
   try {
-    const configured = await upstreamStore.getEnabled();
-    for (const upstream of configured) {
-      const client = new Client({ name: "urumi-chat-agent", version: "1.0.0" });
-      try {
-        const transport = new StreamableHTTPClientTransport(new URL(upstream.url), upstream.bearerToken ? { requestInit: { headers: { Authorization: "Bearer " + upstream.bearerToken } } } : undefined);
-        await withTimeout(client.connect(transport), 5000, upstream.name + " connection");
-        clients.push(client);
-        const discovered = await client.listTools();
-        for (const tool of discovered.tools) {
-          let name = tool.name;
-          if (toolMap.has(name)) name = upstream.name + "__" + name;
-          if (toolMap.has(name)) continue;
-          toolMap.set(name, { client, upstream: upstream.name, originalName: tool.name });
-          visibleTools.push({ type: "function", function: { name, description: String(tool.description || "Tool from " + upstream.name).slice(0, 1000), parameters: tool.inputSchema || { type: "object", properties: {} } } });
-        }
-      } catch (error) {
-        console.warn("Chat discovery failed for " + upstream.name + ": " + error.message);
-        await client.close().catch(() => {});
-      }
-    }
+    // The chat agent uses a short-lived API key and connects to the same MCP
+    // endpoint exposed to external clients. This keeps all tool traffic on the gateway path.
+    temporaryKeyRecord = await apiKeyStore.issueApiKey(req.dashboardUser.email);
+    gatewayClient = new Client({ name: "urumi-dashboard-chat-agent", version: "1.0.0" });
+    const gatewayUrl = new URL("http://127.0.0.1:" + PORT + "/mcp");
+    const gatewayTransport = new StreamableHTTPClientTransport(gatewayUrl, {
+      requestInit: { headers: { Authorization: "Bearer " + temporaryKeyRecord.apiKey } }
+    });
+    await withTimeout(gatewayClient.connect(gatewayTransport), 8000, "Gateway MCP connection");
+    const discovered = await withTimeout(gatewayClient.listTools(), 8000, "Gateway tool discovery");
+    const toolMap = new Map();
+    const visibleTools = discovered.tools.map(tool => {
+      const match = String(tool.description || "").match(/^\[server:([^\]]+)\]/);
+      const upstreamName = match ? match[1] : "gateway";
+      toolMap.set(tool.name, { upstream: upstreamName, originalName: tool.name });
+      return { type: "function", function: {
+        name: tool.name,
+        description: String(tool.description || "Tool provided by the MCP gateway").slice(0, 1000),
+        parameters: tool.inputSchema || { type: "object", properties: {} }
+      }};
+    });
     const endpoint = baseUrl.replace(/\/+$/, "") + "/chat/completions";
-    const messages = [{ role: "system", content: "You are the Urumi store operations assistant. Use available MCP tools for store data and actions. Do not claim an action succeeded unless the tool result confirms it. Ask for confirmation before destructive or irreversible actions." }, { role: "user", content: prompt }];
+    const messages = [
+      { role: "system", content: "You are the Urumi store operations assistant. Use available MCP gateway tools for store data and actions. Do not claim an action succeeded unless the tool result confirms it. Ask for confirmation before destructive or irreversible actions." },
+      { role: "user", content: prompt }
+    ];
     let answer = "";
     for (let turn = 0; turn < 5; turn++) {
-      const response = await fetch(endpoint, { method: "POST", headers: { Authorization: "Bearer " + llmKey, "Content-Type": "application/json" }, body: JSON.stringify({ model, messages, tools: visibleTools.length ? visibleTools : undefined, tool_choice: visibleTools.length ? "auto" : undefined }), signal: AbortSignal.timeout(45000) });
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { Authorization: "Bearer " + llmKey, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, tools: visibleTools.length ? visibleTools : undefined, tool_choice: visibleTools.length ? "auto" : undefined }),
+        signal: AbortSignal.timeout(45000)
+      });
       if (!response.ok) throw new Error("LLM provider returned HTTP " + response.status + ".");
       const payload = await response.json();
       const choice = payload.choices?.[0]?.message;
@@ -332,18 +342,17 @@ app.post("/api/chat", requireUser, async (req, res) => {
       for (const toolCall of choice.tool_calls) {
         const name = toolCall.function?.name;
         const target = toolMap.get(name);
-        let result;
         const started = Date.now();
+        let result;
         try {
           if (!target) throw new Error("Tool is no longer available.");
           const args = JSON.parse(toolCall.function.arguments || "{}");
-          result = await target.client.callTool({ name: target.originalName, arguments: args });
-          calls.push({ name, upstream: target.upstream, outcome: result?.isError ? "error" : "success" });
-          await auditLog.recordToolCall({ userId: req.dashboardUser.email, serverName: target.upstream, toolName: name, status: result?.isError ? "error" : "success", durationMs: Date.now() - started });
+          result = await withTimeout(gatewayClient.callTool({ name: target.originalName, arguments: args }), 35000, "Gateway tool call");
+          const outcome = result?.isError ? "error" : "success";
+          calls.push({ name, upstream: target.upstream, outcome });
         } catch (error) {
           result = { isError: true, content: [{ type: "text", text: "Tool call failed safely: " + error.message }] };
-          calls.push({ name, upstream: target?.upstream || "unknown", outcome: "error" });
-          await auditLog.recordToolCall({ userId: req.dashboardUser.email, serverName: target?.upstream || "unknown", toolName: name || "unknown", status: "error", durationMs: Date.now() - started }).catch(() => {});
+          calls.push({ name: name || "unknown", upstream: target?.upstream || "unknown", outcome: "error" });
         }
         messages.push({ role: "tool", tool_call_id: toolCall.id, content: JSON.stringify(result).slice(0, 12000) });
       }
@@ -351,8 +360,11 @@ app.post("/api/chat", requireUser, async (req, res) => {
     res.json({ answer, toolCalls: calls });
   } catch (error) {
     console.error("Chat request failed:", error.message);
-    res.status(502).json({ error: "Chat request failed. Check the configured LLM provider and upstream connectivity." });
-  } finally { await Promise.allSettled(clients.map(client => client.close())); }
+    res.status(502).json({ error: "Chat request failed. Check the configured LLM provider and gateway connectivity." });
+  } finally {
+    if (gatewayClient) await gatewayClient.close().catch(() => {});
+    if (temporaryKeyRecord) await apiKeyStore.revokeApiKey(temporaryKeyRecord.id).catch(() => {});
+  }
 });
 
 app.get("/api/upstreams", requireUser, async (req, res) => {
