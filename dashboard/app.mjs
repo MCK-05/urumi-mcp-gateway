@@ -13,10 +13,15 @@ async function api(path, options = {}) {
   return data;
 }
 function Table({ headers, rows }) {
+  const headerCells = headers.map(label => h("th", { key: label }, label));
+  const bodyRows = rows.map((row, rowIndex) => {
+    const cells = row.map((cell, cellIndex) => h("td", { key: cellIndex }, cell));
+    return h("tr", { key: rowIndex }, cells);
+  });
   return h("div", { className: "table-wrap" },
     h("table", null,
-      h("thead", null, h("tr", null, headers.map(x => h("th", { key: x }, x)))),
-      h("tbody", null, rows.map((row, i) => h("tr", { key: i }, row.map((cell, j) => h("td", { key: j }, cell))))
+      h("thead", null, h("tr", null, headerCells)),
+      h("tbody", null, bodyRows)
     )
   );
 }
