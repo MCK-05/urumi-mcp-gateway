@@ -79,5 +79,4 @@ These tests do not mean that all assignment acceptance criteria have passed.
 See `docs/ASSIGNMENT-CHECKLIST.md` for requirement status. Only mark requirements complete after implementation and testing.
 ## Security
 Do not commit credentials, Kubernetes Secret values, `.env` files, or local databases. Keep upstream credentials server-side. This prototype requires further security review before production use.
-## Submission
-https://forms.gle/nftwgyNeenSDmiRb6
+
